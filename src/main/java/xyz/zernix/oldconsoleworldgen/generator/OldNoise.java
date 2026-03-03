@@ -101,7 +101,7 @@ final class OldImprovedNoise {
                     int BA = p[B] + Z;
 
                     double vv0 = lerp(u, grad2(p[AA], xPos, zPos), grad(p[BA], xPos - 1.0, 0.0, zPos));
-                    double vv2 = lerp(w, grad(p[AA + 1], xPos, 0.0, zPos - 1.0), grad(p[BA + 1], xPos - 1.0, 0.0, zPos - 1.0));
+                    double vv2 = lerp(u, grad(p[AA + 1], xPos, 0.0, zPos - 1.0), grad(p[BA + 1], xPos - 1.0, 0.0, zPos - 1.0));
                     buffer[index++] += lerp(w, vv0, vv2) * scale;
                 }
             }

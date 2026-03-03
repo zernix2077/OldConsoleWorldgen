@@ -129,6 +129,10 @@ final class OldLargeCaveFeature extends OldLargeFeature {
             int z0 = Math.max(0, floor(zCave - rad) - chunkZ * 16 - 1);
             int z1 = Math.min(16, floor(zCave + rad) - chunkZ * 16 + 1);
 
+            if (detectWater(buffer, x0, x1, y0, y1, z0, z1)) {
+                continue;
+            }
+
             carveEllipsoid(buffer, chunkX, chunkZ, xCave, yCave, zCave, rad, yRad, x0, x1, y0, y1, z0, z1, false, null);
             if (singleStep) {
                 break;

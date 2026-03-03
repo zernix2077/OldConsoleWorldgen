@@ -23,10 +23,6 @@ Allay reimplementation
 - Nether or End generation
 - Exact block-for-block parity with the original client
 
-# Known issues 
-
-- Too much cave entries on sea floor (concurrency issues)
-
 # Install
 
 - Download .jar file from releases

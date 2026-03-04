@@ -28,8 +28,10 @@ public final class OldOverworldPopulator implements Populator {
         int zo = chunkZ * 16;
 
         OldJavaRandom random = createChunkRandom(chunkX, chunkZ);
-        OldWorldAccess world = new OldWorldAccess(context, config.seaLevel());
+        OldWorldAccess world = new OldWorldAccess(context, config.seaLevel(), biomeSource);
         OldBiome biome = biomeSource.getBiome(xo + 16, zo + 16);
+        generateLakes(world, random, xo, zo);
+        consumeMonsterRoomAttempts(random, xo, zo);
         decorateBiome(world, random, biome, xo, zo);
         return true;
     }
@@ -40,6 +42,32 @@ public final class OldOverworldPopulator implements Populator {
         long zScale = (random.nextLong() / 2L) * 2L + 1L;
         random.setSeed((((long) chunkX * xScale) + ((long) chunkZ * zScale)) ^ config.seed());
         return random;
+    }
+
+    private void generateLakes(OldWorldAccess world, OldJavaRandom random, int xo, int zo) {
+        if (random.nextInt(4) == 0) {
+            int x = xo + random.nextInt(16) + 8;
+            int y = random.nextInt(OldChunkBuffer.GEN_DEPTH);
+            int z = zo + random.nextInt(16) + 8;
+            new OldLakeFeature(OldWorldAccess.WATER).place(world, random, x, y, z);
+        }
+
+        if (random.nextInt(8) == 0) {
+            int x = xo + random.nextInt(16) + 8;
+            int y = random.nextInt(random.nextInt(OldChunkBuffer.GEN_DEPTH - 8) + 8);
+            int z = zo + random.nextInt(16) + 8;
+            if (y < world.seaLevel() || random.nextInt(10) == 0) {
+                new OldLakeFeature(OldWorldAccess.LAVA).place(world, random, x, y, z);
+            }
+        }
+    }
+
+    private void consumeMonsterRoomAttempts(OldJavaRandom random, int xo, int zo) {
+        for (int i = 0; i < 8; i++) {
+            random.nextInt(16);
+            random.nextInt(OldChunkBuffer.GEN_DEPTH);
+            random.nextInt(16);
+        }
     }
 
     private void decorateBiome(OldWorldAccess world, OldJavaRandom random, OldBiome biome, int xo, int zo) {
@@ -459,14 +487,20 @@ final class OldWorldAccess {
 
     private final PopulateContext context;
     private final int seaLevel;
+    private final OldBiomeSource biomeSource;
 
-    OldWorldAccess(PopulateContext context, int seaLevel) {
+    OldWorldAccess(PopulateContext context, int seaLevel, OldBiomeSource biomeSource) {
         this.context = context;
         this.seaLevel = seaLevel;
+        this.biomeSource = biomeSource;
     }
 
     int seaLevel() {
         return seaLevel;
+    }
+
+    OldBiome getBiome(int x, int z) {
+        return biomeSource.getBiome(x, z);
     }
 
     BlockState getBlockState(int x, int y, int z) {
@@ -522,6 +556,10 @@ final class OldWorldAccess {
     boolean isLava(int x, int y, int z) {
         BlockType<?> type = getType(x, y, z);
         return type == BlockTypes.LAVA || type == BlockTypes.FLOWING_LAVA;
+    }
+
+    boolean isLiquid(int x, int y, int z) {
+        return isWater(x, y, z) || isLava(x, y, z);
     }
 
     boolean isReplaceableByTree(int x, int y, int z) {
@@ -597,6 +635,21 @@ final class OldWorldAccess {
             y--;
         }
         return y;
+    }
+
+    boolean canSeeSky(int x, int y, int z) {
+        for (int yy = y; yy < OldChunkBuffer.GEN_DEPTH; yy++) {
+            if (!isAir(x, yy, z)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    BlockState getBiomeSurfaceBlock(int x, int z) {
+        return getBiome(x, z).topBlockId() == OldBlockIds.MYCELIUM
+                ? BlockTypes.MYCELIUM.getDefaultState()
+                : GRASS;
     }
 
     static boolean isLeaves(BlockType<?> type) {
@@ -856,6 +909,146 @@ final class OldSpringFeature implements OldFeature {
             world.scheduleFluidUpdate(x, y, z);
         }
         return true;
+    }
+}
+
+final class OldLakeFeature implements OldFeature {
+    private static final int WIDTH = 16;
+    private static final int HEIGHT = 8;
+
+    private final BlockState liquid;
+
+    OldLakeFeature(BlockState liquid) {
+        this.liquid = liquid;
+    }
+
+    @Override
+    public boolean place(OldWorldAccess world, OldJavaRandom random, int x, int y, int z) {
+        x -= 8;
+        z -= 8;
+        while (y > 5 && world.isAir(x, y, z)) {
+            y--;
+        }
+        if (y <= 4) {
+            return false;
+        }
+
+        y -= 4;
+
+        boolean[] mask = new boolean[WIDTH * WIDTH * HEIGHT];
+        int spots = random.nextInt(4) + 4;
+        for (int i = 0; i < spots; i++) {
+            double xr = random.nextDouble() * 6.0 + 3.0;
+            double yr = random.nextDouble() * 4.0 + 2.0;
+            double zr = random.nextDouble() * 6.0 + 3.0;
+
+            double xp = random.nextDouble() * (16.0 - xr - 2.0) + 1.0 + xr / 2.0;
+            double yp = random.nextDouble() * (8.0 - yr - 4.0) + 2.0 + yr / 2.0;
+            double zp = random.nextDouble() * (16.0 - zr - 2.0) + 1.0 + zr / 2.0;
+
+            for (int xx = 1; xx < 15; xx++) {
+                for (int zz = 1; zz < 15; zz++) {
+                    for (int yy = 1; yy < 7; yy++) {
+                        double xd = (xx - xp) / (xr / 2.0);
+                        double yd = (yy - yp) / (yr / 2.0);
+                        double zd = (zz - zp) / (zr / 2.0);
+                        if (xd * xd + yd * yd + zd * zd < 1.0) {
+                            mask[index(xx, zz, yy)] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int xx = 0; xx < 16; xx++) {
+            for (int zz = 0; zz < 16; zz++) {
+                for (int yy = 0; yy < 8; yy++) {
+                    if (!isBoundary(mask, xx, zz, yy)) {
+                        continue;
+                    }
+                    int wx = x + xx;
+                    int wy = y + yy;
+                    int wz = z + zz;
+                    if (yy >= 4 && world.isLiquid(wx, wy, wz)) {
+                        return false;
+                    }
+                    if (yy < 4 && !world.isSolid(wx, wy, wz) && world.getType(wx, wy, wz) != liquid.getBlockType()) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        for (int xx = 0; xx < 16; xx++) {
+            for (int zz = 0; zz < 16; zz++) {
+                for (int yy = 0; yy < 8; yy++) {
+                    if (!mask[index(xx, zz, yy)]) {
+                        continue;
+                    }
+                    int wx = x + xx;
+                    int wy = y + yy;
+                    int wz = z + zz;
+                    if (yy >= 4) {
+                        world.setBlockState(wx, wy, wz, OldWorldAccess.AIR);
+                    } else {
+                        world.setBlockState(wx, wy, wz, liquid);
+                        world.scheduleFluidUpdate(wx, wy, wz);
+                    }
+                }
+            }
+        }
+
+        for (int xx = 0; xx < 16; xx++) {
+            for (int zz = 0; zz < 16; zz++) {
+                for (int yy = 4; yy < 8; yy++) {
+                    if (!mask[index(xx, zz, yy)]) {
+                        continue;
+                    }
+                    int wx = x + xx;
+                    int wy = y + yy;
+                    int wz = z + zz;
+                    if (world.getType(wx, wy - 1, wz) == BlockTypes.DIRT && world.canSeeSky(wx, wy, wz)) {
+                        world.setBlockState(wx, wy - 1, wz, world.getBiomeSurfaceBlock(wx, wz));
+                    }
+                }
+            }
+        }
+
+        if (liquid.getBlockType() == BlockTypes.LAVA) {
+            for (int xx = 0; xx < 16; xx++) {
+                for (int zz = 0; zz < 16; zz++) {
+                    for (int yy = 0; yy < 8; yy++) {
+                        if (!isBoundary(mask, xx, zz, yy)) {
+                            continue;
+                        }
+                        int wx = x + xx;
+                        int wy = y + yy;
+                        int wz = z + zz;
+                        if ((yy < 4 || random.nextInt(2) != 0) && world.isSolid(wx, wy, wz)) {
+                            world.setBlockState(wx, wy, wz, OldWorldAccess.STONE);
+                        }
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static int index(int x, int z, int y) {
+        return ((x * WIDTH) + z) * HEIGHT + y;
+    }
+
+    private static boolean isBoundary(boolean[] mask, int x, int z, int y) {
+        if (mask[index(x, z, y)]) {
+            return false;
+        }
+        return (x < 15 && mask[index(x + 1, z, y)])
+                || (x > 0 && mask[index(x - 1, z, y)])
+                || (z < 15 && mask[index(x, z + 1, y)])
+                || (z > 0 && mask[index(x, z - 1, y)])
+                || (y < 7 && mask[index(x, z, y + 1)])
+                || (y > 0 && mask[index(x, z, y - 1)]);
     }
 }
 

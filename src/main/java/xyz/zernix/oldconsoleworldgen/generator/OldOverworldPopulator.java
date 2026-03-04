@@ -9,6 +9,8 @@ import org.allaymc.api.world.chunk.UnsafeChunk;
 import org.allaymc.api.world.generator.context.PopulateContext;
 import org.allaymc.api.world.generator.function.Populator;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 public final class OldOverworldPopulator implements Populator {
@@ -470,6 +472,8 @@ final class OldWorldAccess {
     static final BlockState RED_MUSHROOM_BLOCK = BlockTypes.RED_MUSHROOM_BLOCK.getDefaultState();
     static final BlockState MUSHROOM_STEM = BlockTypes.MUSHROOM_STEM.getDefaultState().setPropertyValue(BlockPropertyTypes.HUGE_MUSHROOM_BITS, 10);
     static final BlockState OAK_LOG = vertical(BlockTypes.OAK_LOG.getDefaultState());
+    static final BlockState OAK_LOG_X = axis(BlockTypes.OAK_LOG.getDefaultState(), PillarAxis.X);
+    static final BlockState OAK_LOG_Z = axis(BlockTypes.OAK_LOG.getDefaultState(), PillarAxis.Z);
     static final BlockState BIRCH_LOG = vertical(BlockTypes.BIRCH_LOG.getDefaultState());
     static final BlockState SPRUCE_LOG = vertical(BlockTypes.SPRUCE_LOG.getDefaultState());
     static final BlockState JUNGLE_LOG = vertical(BlockTypes.JUNGLE_LOG.getDefaultState());
@@ -673,6 +677,10 @@ final class OldWorldAccess {
 
     private static BlockState vertical(BlockState state) {
         return state.setPropertyValue(BlockPropertyTypes.PILLAR_AXIS, PillarAxis.Y);
+    }
+
+    private static BlockState axis(BlockState state, PillarAxis axis) {
+        return state.setPropertyValue(BlockPropertyTypes.PILLAR_AXIS, axis);
     }
 }
 
@@ -1276,56 +1284,302 @@ final class OldTreeFeature extends OldAbstractTreeFeature {
 }
 
 final class OldFancyTreeFeature extends OldAbstractTreeFeature {
+    private static final byte[] AXIS_CONVERSION_ARRAY = {2, 0, 0, 1, 2, 1};
+
+    private final OldJavaRandom innerRandom = new OldJavaRandom(0L);
+    private final int[] origin = new int[3];
+    private int height;
+    private int trunkHeight;
+    private final double trunkHeightScale = 0.618;
+    private final double branchDensity = 1.0;
+    private final double branchSlope = 0.381;
+    private final double widthScale = 1.0;
+    private final double foliageDensity = 1.0;
+    private final int trunkWidth = 1;
+    private final int heightVariance = 12;
+    private final int foliageHeight = 4;
+    private List<int[]> foliageCoords = List.of();
+    private OldWorldAccess currentWorld;
+
     @Override
     public boolean place(OldWorldAccess world, OldJavaRandom random, int x, int y, int z) {
-        int treeHeight = random.nextInt(5) + 7;
-        if (y < 1 || y + treeHeight + 2 > OldChunkBuffer.GEN_DEPTH) {
+        currentWorld = world;
+        innerRandom.setSeed(random.nextLong());
+        origin[0] = x;
+        origin[1] = y;
+        origin[2] = z;
+        height = 5 + innerRandom.nextInt(heightVariance);
+        foliageCoords = List.of();
+
+        if (!checkLocation(world)) {
             return false;
         }
-        if (!world.isGroundForTree(x, y - 1, z)) {
-            return false;
-        }
-        for (int yy = y; yy <= y + treeHeight + 1; yy++) {
-            int r = yy < y + treeHeight - 3 ? 1 : 3;
-            for (int xx = x - r; xx <= x + r; xx++) {
-                for (int zz = z - r; zz <= z + r; zz++) {
-                    if (!world.isReplaceableByTree(xx, yy, zz)) {
-                        return false;
-                    }
-                }
-            }
-        }
 
-        replaceWithDirt(world, x, y - 1, z);
-        for (int yy = y + treeHeight - 3; yy <= y + treeHeight; yy++) {
-            int yo = yy - (y + treeHeight);
-            int radius = 2 - yo / 2;
-            for (int xx = x - radius; xx <= x + radius; xx++) {
-                for (int zz = z - radius; zz <= z + radius; zz++) {
-                    int xo = Math.abs(xx - x);
-                    int zo = Math.abs(zz - z);
-                    if ((xo != radius || zo != radius || random.nextInt(2) != 0 || yo == 0) && !world.isSolid(xx, yy, zz)) {
-                        world.setBlockState(xx, yy, zz, OldWorldAccess.OAK_LEAVES);
-                    }
-                }
-            }
-        }
-
-        for (int yy = y + treeHeight - 5; yy <= y + treeHeight - 3; yy++) {
-            int radius = yy == y + treeHeight - 5 ? 1 : 2;
-            for (int xx = x - radius; xx <= x + radius; xx++) {
-                for (int zz = z - radius; zz <= z + radius; zz++) {
-                    if (!world.isSolid(xx, yy, zz)) {
-                        world.setBlockState(xx, yy, zz, OldWorldAccess.OAK_LEAVES);
-                    }
-                }
-            }
-        }
-
-        for (int hh = 0; hh < treeHeight; hh++) {
-            placeLog(world, x, y + hh, z, OldWorldAccess.OAK_LOG);
-        }
+        prepare();
+        makeFoliage(world);
+        makeTrunk(world);
+        makeBranches(world);
         return true;
+    }
+
+    private void prepare() {
+        trunkHeight = (int) (height * trunkHeightScale);
+        if (trunkHeight >= height) {
+            trunkHeight = height - 1;
+        }
+        int clustersPerY = (int) (1.382 + Math.pow(foliageDensity * height / 13.0, 2.0));
+        if (clustersPerY < 1) {
+            clustersPerY = 1;
+        }
+
+        List<int[]> coords = new ArrayList<>(clustersPerY * height);
+        int y = origin[1] + height - foliageHeight;
+        int trunkTop = origin[1] + trunkHeight;
+        int relativeY = y - origin[1];
+
+        coords.add(new int[]{origin[0], y, origin[2], trunkTop});
+        y--;
+
+        while (relativeY >= 0) {
+            float shapeFactor = treeShape(relativeY);
+            if (shapeFactor < 0.0f) {
+                y--;
+                relativeY--;
+                continue;
+            }
+
+            int num = 0;
+            double originOffset = 0.5;
+            while (num < clustersPerY) {
+                double radius = widthScale * (shapeFactor * (innerRandom.nextFloat() + 0.328));
+                double angle = innerRandom.nextFloat() * 2.0 * Math.PI;
+                int x = floor(radius * Math.sin(angle) + origin[0] + originOffset);
+                int z = floor(radius * Math.cos(angle) + origin[2] + originOffset);
+                int[] checkStart = {x, y, z};
+                int[] checkEnd = {x, y + foliageHeight, z};
+                if (checkLine(currentWorld, checkStart, checkEnd) == -1) {
+                    int[] branchBase = {origin[0], origin[1], origin[2]};
+                    double distance = Math.sqrt(
+                            Math.pow(Math.abs(origin[0] - checkStart[0]), 2.0)
+                                    + Math.pow(Math.abs(origin[2] - checkStart[2]), 2.0)
+                    );
+                    double branchHeight = distance * branchSlope;
+                    if ((checkStart[1] - branchHeight) > trunkTop) {
+                        branchBase[1] = trunkTop;
+                    } else {
+                        branchBase[1] = (int) (checkStart[1] - branchHeight);
+                    }
+                    if (checkLine(currentWorld, branchBase, checkStart) == -1) {
+                        coords.add(new int[]{x, y, z, branchBase[1]});
+                    }
+                }
+                num++;
+            }
+            y--;
+            relativeY--;
+        }
+
+        foliageCoords = coords;
+    }
+
+    private float treeShape(int y) {
+        if (y < (height * 0.3f)) {
+            return -1.618f;
+        }
+        float radius = height / 2.0f;
+        float adjacent = (height / 2.0f) - y;
+        float distance;
+        if (adjacent == 0.0f) {
+            distance = radius;
+        } else if (Math.abs(adjacent) >= radius) {
+            distance = 0.0f;
+        } else {
+            distance = (float) Math.sqrt(Math.pow(Math.abs(radius), 2.0) - Math.pow(Math.abs(adjacent), 2.0));
+        }
+        return distance * 0.5f;
+    }
+
+    private float foliageShape(int y) {
+        if (y < 0 || y >= foliageHeight) {
+            return -1.0f;
+        }
+        if (y == 0 || y == foliageHeight - 1) {
+            return 2.0f;
+        }
+        return 3.0f;
+    }
+
+    private void foliageCluster(OldWorldAccess world, int x, int y, int z) {
+        for (int currentY = y + foliageHeight - 1; currentY >= y; currentY--) {
+            float radius = foliageShape(currentY - y);
+            crossSection(world, x, currentY, z, radius, (byte) 1, OldWorldAccess.OAK_LEAVES);
+        }
+    }
+
+    private void crossSection(OldWorldAccess world, int x, int y, int z, float radius, byte direction, BlockState blockState) {
+        int rad = (int) (radius + 0.618);
+        byte secIdx1 = AXIS_CONVERSION_ARRAY[direction];
+        byte secIdx2 = AXIS_CONVERSION_ARRAY[direction + 3];
+        int[] center = {x, y, z};
+        int[] position = {0, 0, 0};
+        position[direction] = center[direction];
+        for (int offset1 = -rad; offset1 <= rad; offset1++) {
+            position[secIdx1] = center[secIdx1] + offset1;
+            for (int offset2 = -rad; offset2 <= rad; offset2++) {
+                double distance = Math.pow(Math.abs(offset1) + 0.5, 2.0) + Math.pow(Math.abs(offset2) + 0.5, 2.0);
+                if (distance > radius * radius) {
+                    continue;
+                }
+                position[secIdx2] = center[secIdx2] + offset2;
+                BlockType<?> current = world.getType(position[0], position[1], position[2]);
+                if (current != BlockTypes.AIR && !OldWorldAccess.isLeaves(current)) {
+                    continue;
+                }
+                world.setBlockState(position[0], position[1], position[2], blockState);
+            }
+        }
+    }
+
+    private void limb(OldWorldAccess world, int[] start, int[] end, boolean leaves) {
+        int[] delta = {0, 0, 0};
+        byte primaryIndex = 0;
+        for (byte i = 0; i < 3; i++) {
+            delta[i] = end[i] - start[i];
+            if (Math.abs(delta[i]) > Math.abs(delta[primaryIndex])) {
+                primaryIndex = i;
+            }
+        }
+        if (delta[primaryIndex] == 0) {
+            return;
+        }
+
+        byte secIdx1 = AXIS_CONVERSION_ARRAY[primaryIndex];
+        byte secIdx2 = AXIS_CONVERSION_ARRAY[primaryIndex + 3];
+        int primarySign = delta[primaryIndex] > 0 ? 1 : -1;
+        double secFactor1 = (double) delta[secIdx1] / (double) delta[primaryIndex];
+        double secFactor2 = (double) delta[secIdx2] / (double) delta[primaryIndex];
+        int[] coordinate = {0, 0, 0};
+        for (int primaryOffset = 0, endOffset = delta[primaryIndex] + primarySign; primaryOffset != endOffset; primaryOffset += primarySign) {
+            coordinate[primaryIndex] = floor(start[primaryIndex] + primaryOffset + 0.5);
+            coordinate[secIdx1] = floor(start[secIdx1] + (primaryOffset * secFactor1) + 0.5);
+            coordinate[secIdx2] = floor(start[secIdx2] + (primaryOffset * secFactor2) + 0.5);
+            if (leaves) {
+                world.setBlockState(coordinate[0], coordinate[1], coordinate[2], OldWorldAccess.OAK_LEAVES);
+            } else {
+                world.setBlockState(coordinate[0], coordinate[1], coordinate[2], oakLogForAxis(coordinate, start));
+            }
+        }
+    }
+
+    private void makeFoliage(OldWorldAccess world) {
+        for (int[] coord : foliageCoords) {
+            foliageCluster(world, coord[0], coord[1], coord[2]);
+        }
+    }
+
+    private boolean trimBranches(int localY) {
+        return localY >= (height * 0.2);
+    }
+
+    private void makeTrunk(OldWorldAccess world) {
+        int[] start = {origin[0], origin[1], origin[2]};
+        int[] end = {origin[0], origin[1] + trunkHeight, origin[2]};
+        limb(world, start, end, false);
+        if (trunkWidth == 2) {
+            start[0] += 1;
+            end[0] += 1;
+            limb(world, start, end, false);
+            start[2] += 1;
+            end[2] += 1;
+            limb(world, start, end, false);
+            start[0] -= 1;
+            end[0] -= 1;
+            limb(world, start, end, false);
+        }
+    }
+
+    private void makeBranches(OldWorldAccess world) {
+        int[] base = {origin[0], origin[1], origin[2]};
+        for (int[] coord : foliageCoords) {
+            int[] end = {coord[0], coord[1], coord[2]};
+            base[1] = coord[3];
+            int localY = base[1] - origin[1];
+            if (trimBranches(localY)) {
+                limb(world, base, end, false);
+            }
+        }
+    }
+
+    private int checkLine(OldWorldAccess world, int[] start, int[] end) {
+        int[] delta = {0, 0, 0};
+        byte primaryIndex = 0;
+        for (byte i = 0; i < 3; i++) {
+            delta[i] = end[i] - start[i];
+            if (Math.abs(delta[i]) > Math.abs(delta[primaryIndex])) {
+                primaryIndex = i;
+            }
+        }
+        if (delta[primaryIndex] == 0) {
+            return -1;
+        }
+
+        byte secIdx1 = AXIS_CONVERSION_ARRAY[primaryIndex];
+        byte secIdx2 = AXIS_CONVERSION_ARRAY[primaryIndex + 3];
+        int primarySign = delta[primaryIndex] > 0 ? 1 : -1;
+        double secFactor1 = (double) delta[secIdx1] / (double) delta[primaryIndex];
+        double secFactor2 = (double) delta[secIdx2] / (double) delta[primaryIndex];
+        int[] coordinate = {0, 0, 0};
+        int primaryOffset = 0;
+        int endOffset = delta[primaryIndex] + primarySign;
+        while (primaryOffset != endOffset) {
+            coordinate[primaryIndex] = start[primaryIndex] + primaryOffset;
+            coordinate[secIdx1] = floor(start[secIdx1] + (primaryOffset * secFactor1));
+            coordinate[secIdx2] = floor(start[secIdx2] + (primaryOffset * secFactor2));
+            BlockType<?> material = world.getType(coordinate[0], coordinate[1], coordinate[2]);
+            if (material != BlockTypes.AIR && !OldWorldAccess.isLeaves(material)) {
+                break;
+            }
+            primaryOffset += primarySign;
+        }
+        return primaryOffset == endOffset ? -1 : Math.abs(primaryOffset);
+    }
+
+    private boolean checkLocation(OldWorldAccess world) {
+        int[] start = {origin[0], origin[1], origin[2]};
+        int[] end = {origin[0], origin[1] + height - 1, origin[2]};
+        BlockType<?> base = world.getType(origin[0], origin[1] - 1, origin[2]);
+        if (base != BlockTypes.GRASS_BLOCK && base != BlockTypes.DIRT) {
+            return false;
+        }
+        int allowedHeight = checkLine(world, start, end);
+        if (allowedHeight == -1) {
+            return true;
+        }
+        if (allowedHeight < 6) {
+            return false;
+        }
+        height = allowedHeight;
+        return true;
+    }
+
+    private static int floor(double value) {
+        int floor = (int) value;
+        return value < floor ? floor - 1 : floor;
+    }
+
+    private static BlockState oakLogForAxis(int[] coordinate, int[] start) {
+        int xDiff = Math.abs(coordinate[0] - start[0]);
+        int zDiff = Math.abs(coordinate[2] - start[2]);
+        int maxDiff = Math.max(xDiff, zDiff);
+        if (maxDiff > 0) {
+            if (xDiff == maxDiff) {
+                return OldWorldAccess.OAK_LOG_X;
+            }
+            if (zDiff == maxDiff) {
+                return OldWorldAccess.OAK_LOG_Z;
+            }
+        }
+        return OldWorldAccess.OAK_LOG;
     }
 }
 

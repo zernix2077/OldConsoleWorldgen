@@ -1,5 +1,6 @@
 package xyz.zernix.oldconsoleworldgen.generator;
 
+import org.allaymc.api.block.data.BlockFace;
 import org.allaymc.api.block.type.BlockTypes;
 import org.allaymc.api.world.generator.context.PostProcessContext;
 import org.allaymc.api.world.generator.function.PostProcessor;
@@ -31,12 +32,26 @@ public final class OldOverworldPostProcessor implements PostProcessor {
                 int snowY = topBlock == BlockTypes.AIR ? topY : topY + 1;
                 if (snowY <= OldChunkBuffer.GEN_DEPTH - 1
                         && chunk.getBlockState(x, snowY, z).getBlockType() == BlockTypes.AIR
-                        && chunk.getBlockState(x, snowY - 1, z).getBlockType() != BlockTypes.WATER
-                        && chunk.getBlockState(x, snowY - 1, z).getBlockType() != BlockTypes.FLOWING_WATER) {
+                        && canSupportSnow(chunk.getBlockState(x, snowY - 1, z))) {
                     chunk.setBlockState(x, snowY, z, BlockTypes.SNOW_LAYER.getDefaultState());
                 }
             }
         }
         return true;
+    }
+
+    private static boolean canSupportSnow(org.allaymc.api.block.type.BlockState below) {
+        var type = below.getBlockType();
+        if (type == BlockTypes.AIR || type == BlockTypes.ICE) {
+            return false;
+        }
+        if (type == BlockTypes.OAK_LEAVES
+                || type == BlockTypes.BIRCH_LEAVES
+                || type == BlockTypes.SPRUCE_LEAVES
+                || type == BlockTypes.JUNGLE_LEAVES) {
+            return true;
+        }
+        return below.getBlockStateData().collisionShape().isFull(BlockFace.UP)
+                && below.getBlockStateData().isSolid();
     }
 }

@@ -5,7 +5,7 @@ plugins {
 
 group = "xyz.zernix.oldconsoleworldgen"
 description = "Bring back minecraft legacy console edition world generation."
-version = "0.1.1"
+version = "0.1.2"
 
 java {
     toolchain {

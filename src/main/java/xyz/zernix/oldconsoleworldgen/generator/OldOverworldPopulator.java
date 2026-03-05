@@ -334,7 +334,7 @@ public final class OldOverworldPopulator implements Populator {
                 return new OldTallGrassFeature(OldWorldAccess.FERN);
             }
         }
-        return new OldTallGrassFeature(OldWorldAccess.TALL_GRASS);
+        return new OldTallGrassFeature(OldWorldAccess.SHORT_GRASS);
     }
 }
 
@@ -462,7 +462,7 @@ final class OldWorldAccess {
     static final BlockState BROWN_MUSHROOM = BlockTypes.BROWN_MUSHROOM.getDefaultState();
     static final BlockState RED_MUSHROOM = BlockTypes.RED_MUSHROOM.getDefaultState();
     static final BlockState DEADBUSH = BlockTypes.DEADBUSH.getDefaultState();
-    static final BlockState TALL_GRASS = BlockTypes.TALL_GRASS.getDefaultState();
+    static final BlockState SHORT_GRASS = BlockTypes.SHORT_GRASS.getDefaultState();
     static final BlockState FERN = BlockTypes.FERN.getDefaultState();
     static final BlockState REEDS = BlockTypes.REEDS.getDefaultState();
     static final BlockState CACTUS = BlockTypes.CACTUS.getDefaultState();
